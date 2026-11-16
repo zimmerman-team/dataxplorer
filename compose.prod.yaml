@@ -1,0 +1,21 @@
+# Servers only (test, staging, production): `make up` adds this file, `make dev` doesn't.
+# Only structural differences that env vars can't express belong here.
+
+x-restart: &restart
+  restart: unless-stopped
+
+services:
+  mongo: *restart
+  redis: *restart
+  server: *restart
+  backend:
+    <<: *restart
+    deploy:
+      resources:
+        limits:
+          # Set lower in each env file when several environments share a server.
+          memory: ${BACKEND_MEMORY_LIMIT:-8G}
+  ai-api: *restart
+  client: *restart
+  cms: *restart
+  cms-db: *restart

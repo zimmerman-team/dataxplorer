@@ -1,0 +1,13 @@
+# The app repos behind DX, for `make repos` and the switch-branch workflow.
+# `make repos` clones each one into the folder above this repo, next to it
+# (the README's "Set up the folders" shows the layout). Services take their
+# branch from the versions file; the last column is the branch for a repo
+# that isn't a service.
+#
+# name              GitHub repo                       folder next to this repo   branch
+client              zimmerman-team/Dx.client          dx.client
+server              zimmerman-team/Dx.server          dx.server
+backend             zimmerman-team/dx.backend         dx.backend
+ai-api              zimmerman-team/general-ai-api     general-ai-api
+cms                 zimmerman-team/CMS-DX             CMS-DX
+rawgraphs-charts    zimmerman-team/rawgraphs-charts   rawgraphs-charts           feat/DX-137

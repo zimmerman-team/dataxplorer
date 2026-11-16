@@ -1,0 +1,42 @@
+# Local development: copy this to compose.override.yaml (git-ignored) and keep
+# the parts you need. `make dev` picks compose.override.yaml up when it exists.
+#
+# `make dev` already builds every image from your checkouts next to this repo
+# (compose.dev.yaml). This file adds hot reloading: your source is mounted into
+# the container, so changes show up without a rebuild. To skip Docker for a
+# service, run `make dev` in its repo instead and switch its container off here.
+
+services:
+  server:
+    # nodemon rebuilds and restarts the server when src/ changes.
+    command: ["yarn", "dev"]
+    environment:
+      NODE_ENV: development
+    volumes:
+      - ../dx.server/src:/app/src
+
+  # backend:
+  #   command: ["flask", "--app", "app", "run", "--host", "0.0.0.0", "--port", "4004", "--debug"]
+  #   volumes:
+  #     - ../dx.backend/app.py:/app/app.py
+  #     - ../dx.backend/services:/app/services
+
+  # ai-api:
+  #   command: ["flask", "run", "--host", "0.0.0.0", "--port", "5000", "--debug"]
+  #   volumes:
+  #     - ../general-ai-api/api:/app/api
+
+  # The client is quickest run outside Docker: `make dev` in ../dx.client.
+  # Switch its container off so the two don't both want a port:
+  # client:
+  #   profiles: [disabled]
+
+  # Reach the databases from your machine (Compass, mongosh, or a service run
+  # with `make dev` in its repo, using the credentials in .env.development).
+  # Servers never publish them. Stop any MongoDB or Redis of your own first.
+  mongo:
+    ports:
+      - "127.0.0.1:27017:27017"
+  redis:
+    ports:
+      - "127.0.0.1:6379:6379"

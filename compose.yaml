@@ -1,0 +1,247 @@
+# DX: every service, for every environment.
+#
+# Run it through the Makefile (`make help`), not `docker compose` directly. The
+# Makefile picks the env file, the versions file, the project name (dx-<env>)
+# and the extra compose files for ENV.
+#
+# - On servers, app images come from GitHub Container Registry, tagged with the
+#   app repo's commit SHA. Which tag each environment runs is in versions.<env>.env.
+#   In development they're built from your checkouts instead (compose.dev.yaml).
+# - Values that differ per environment come from .env.<env> (see .env.example).
+# - Server-only differences (restart policy, memory limits) are in compose.prod.yaml.
+# - Optional profile, switched on per environment with COMPOSE_PROFILES in .env.<env>:
+#     cms         Strapi (CMS-DX) and its Postgres database
+# - Monitoring isn't part of this file: it runs on its own server. Containers log
+#   to stdout, which Docker keeps (rotated, see x-logging) for a log agent to ship.
+#
+# Hostnames inside the compose network (mongo, redis, backend, ai-api) are the
+# same in every environment; the project name keeps environments apart, so
+# several environments (test and staging, say) can share one server.
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  # ---------------------------------------------------------------- databases
+
+  mongo:
+    # Stateful: confirm this matches the version the server runs today before
+    # the first deploy (docs/MIGRATION.md, step 1).
+    image: mongo:8.0
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME:?}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:?}
+      MONGO_INITDB_DATABASE: ${MONGO_INITDB_DATABASE:-the-data-explorer-db}
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    logging: *logging
+
+  redis:
+    # Stateful: confirm this matches the version the server runs today (docs/MIGRATION.md, step 1).
+    image: redis:8.0
+    command: ["sh", "-c", "exec redis-server --save 20 1 --loglevel debug --requirepass \"$$REDIS_PASSWORD\""]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?}
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    logging: *logging
+
+  # ------------------------------------------------------------- app services
+
+  server:
+    image: ghcr.io/zimmerman-team/dx-server:${SERVER_TAG:?}
+    env_file: ${ENV_FILE:?ENV_FILE is not set. Run docker compose through make.}
+    environment:
+      MONGO_HOST: mongo
+      REDIS_HOST: redis
+      DX_BACKEND_URL: http://backend:4004
+      AIAPI_URL: http://ai-api:5000
+      DX_BACKEND_DIR: /app/dx.backend/
+      PARSED_DATA_FILES_PATH: /app/dx.backend/parsed-data-files/
+    ports:
+      - "127.0.0.1:${SERVER_PORT:-4200}:4200"
+    volumes:
+      # Uploads land in the backend's staging folder; charts are rendered from its parsed files.
+      - staging_files:/app/dx.backend/staging
+      - parsed_data_files:/app/dx.backend/parsed-data-files
+      - server_logs:/app/logging
+      # Key files such as the Google Calendar service account; point GOOGLE_CALENDAR_KEY_FILE at /app/secrets/<file>.
+      - ${SECRETS_DIR:-./secrets}/server:/app/secrets:ro
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # 127.0.0.1, not localhost: inside Alpine images localhost is IPv6 (::1) first.
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:4200/ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      # The current image rebuilds and runs migrations when it starts.
+      start_period: 180s
+    logging: *logging
+
+  backend:
+    image: ghcr.io/zimmerman-team/dx-backend:${BACKEND_TAG:?}
+    env_file: ${ENV_FILE:?ENV_FILE is not set. Run docker compose through make.}
+    environment:
+      MONGO_HOST: mongo
+      DATA_EXPLORER_SSR: /app/
+    ports:
+      - "127.0.0.1:${BACKEND_PORT:-4004}:4004"
+    volumes:
+      - staging_files:/app/staging
+      - parsed_data_files:/app/parsed-data-files
+      - sample_data_files:/app/sample-data-files
+      - backend_logs:/app/logging
+      - type: bind
+        source: ${SECRETS_DIR:-./secrets}/backend/kaggle.json
+        target: /root/.kaggle/kaggle.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${SECRETS_DIR:-./secrets}/backend/hdx_configuration.yaml
+        target: /root/.hdx_configuration.yaml
+        read_only: true
+        bind:
+          create_host_path: false
+    depends_on:
+      mongo:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:4004/health-check', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    logging: *logging
+
+  ai-api:
+    image: ghcr.io/zimmerman-team/dx-ai-api:${AI_API_TAG:?}
+    command: ["gunicorn", "--bind", "0.0.0.0:5000", "manage:app"]
+    env_file: ${ENV_FILE:?ENV_FILE is not set. Run docker compose through make.}
+    environment:
+      AIAPI_PARSED_DATA_FILES: /parsed-data-files/
+    ports:
+      - "127.0.0.1:${AI_API_PORT:-5000}:5000"
+    volumes:
+      - parsed_data_files:/parsed-data-files
+    healthcheck:
+      # Every route, the health check included, needs the API key in the Authorization header.
+      test: ["CMD", "python", "-c", "import os, urllib.request as r; r.urlopen(r.Request('http://localhost:5000/health-check/', headers={'Authorization': os.environ.get('AIAPI_API_KEY', 'ZIMMERMAN')}), timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    logging: *logging
+
+  client:
+    image: ghcr.io/zimmerman-team/dx-client:${CLIENT_TAG:?}
+    # Only the public VITE_* settings go to the client. The image writes them to
+    # env.js when it starts, so the same image can move from staging to production.
+    environment:
+      VITE_API: ${VITE_API:?}
+      VITE_BASE_URL: ${VITE_BASE_URL:-}
+      VITE_CMS_API: ${VITE_CMS_API:-}
+      VITE_CMS_TOKEN: ${VITE_CMS_TOKEN:-}
+      VITE_GOOGLE_API_CLIENT_ID: ${VITE_GOOGLE_API_CLIENT_ID:-}
+      VITE_GOOGLE_API_DEV_KEY: ${VITE_GOOGLE_API_DEV_KEY:-}
+      VITE_AUTH0_DOMAIN: ${VITE_AUTH0_DOMAIN:-}
+      VITE_AUTH0_CLIENT: ${VITE_AUTH0_CLIENT:-}
+      VITE_AUTH0_AUDIENCE: ${VITE_AUTH0_AUDIENCE:-}
+      VITE_HUBSPOT_PORTAL_ID: ${VITE_HUBSPOT_PORTAL_ID:-}
+      VITE_HUBSPOT_SUBSCRIBE_FORM_ID: ${VITE_HUBSPOT_SUBSCRIBE_FORM_ID:-}
+      VITE_INTERCOM_APP_ID: ${VITE_INTERCOM_APP_ID:-}
+      VITE_ONEDRIVE_CLIENT_ID: ${VITE_ONEDRIVE_CLIENT_ID:-}
+      VITE_MAPBOX_TOKEN: ${VITE_MAPBOX_TOKEN:-}
+      VITE_LIVE_SESSION_ID: ${VITE_LIVE_SESSION_ID:-}
+      VITE_ENV_TYPE: ${VITE_ENV_TYPE:?}
+    ports:
+      - "127.0.0.1:${CLIENT_PORT:-8080}:80"
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    logging: *logging
+
+  # ---------------------------------------------------------- profile: cms
+
+  cms:
+    profiles: [cms]
+    image: ghcr.io/zimmerman-team/dx-cms:${CMS_TAG:?}
+    environment:
+      HOST: 0.0.0.0
+      PORT: 1337
+      NODE_ENV: ${CMS_NODE_ENV:-production}
+      DATABASE_CLIENT: postgres
+      DATABASE_HOST: cms-db
+      DATABASE_PORT: 5432
+      DATABASE_NAME: ${CMS_DATABASE_NAME:-strapi}
+      DATABASE_USERNAME: ${CMS_DATABASE_USERNAME:-strapi}
+      DATABASE_PASSWORD: ${CMS_DATABASE_PASSWORD:-}
+      JWT_SECRET: ${CMS_JWT_SECRET:-}
+      ADMIN_JWT_SECRET: ${CMS_ADMIN_JWT_SECRET:-}
+      APP_KEYS: ${CMS_APP_KEYS:-}
+      API_TOKEN_SALT: ${CMS_API_TOKEN_SALT:-}
+      TRANSFER_TOKEN_SALT: ${CMS_TRANSFER_TOKEN_SALT:-}
+    ports:
+      - "127.0.0.1:${CMS_PORT:-1337}:1337"
+    volumes:
+      # Uploads live in a volume, not in a checkout on the server.
+      - cms_uploads:/opt/app/public/uploads
+    depends_on:
+      cms-db:
+        condition: service_healthy
+    healthcheck:
+      # 127.0.0.1, not localhost: Strapi listens on IPv4 only, and localhost is ::1 here.
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:1337/_health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 60s
+    logging: *logging
+
+  cms-db:
+    profiles: [cms]
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: ${CMS_DATABASE_NAME:-strapi}
+      POSTGRES_USER: ${CMS_DATABASE_USERNAME:-strapi}
+      POSTGRES_PASSWORD: ${CMS_DATABASE_PASSWORD:-}
+    volumes:
+      - cms_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    logging: *logging
+
+volumes:
+  mongo_data:
+  redis_data:
+  # Shared by server, backend and ai-api; these were bind mounts on dx.backend/ in the old checkout.
+  staging_files:
+  parsed_data_files:
+  sample_data_files:
+  backend_logs:
+  server_logs:
+  cms_db_data:
+  cms_uploads:

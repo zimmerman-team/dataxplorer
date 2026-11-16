@@ -1,4 +1,6 @@
 #!/bin/bash
+# Usage: bash scripts/setup/install_base_data.sh [ENV_DIR]  (default /opt/dx)
+# Loads the public sample data (make seed) into the environments you choose.
 
 print_status() {
     echo "
@@ -27,31 +29,14 @@ ask_for_confirmation() {
   esac
 }
 
-# Prepopulate environments
-print_status "We will ask you for each of [dev | test | staging | prod]
-if you want to prepopulate data for that environment."
-if ask_for_confirmation "Do you want to Prepopulate data for the DEV environment?"; then
-  echo "Please update the .env.dev file with the correct values before running this script. We will open the file for you in 3 seconds"
-  sleep 3
-  nano .env.dev
-  bash ./scripts/prepopulate.sh dev
-fi
-if ask_for_confirmation "Do you want to Prepopulate data for the TEST environment?"; then
-  echo "Please update the .env.test file with the correct values before running this script. We will open the file for you in 3 seconds"
-  sleep 3
-  nano .env.test
-  bash ./scripts/prepopulate.sh test
-fi
-if ask_for_confirmation "Do you want to Prepopulate data for the STAGING environment?"; then
-  echo "Please update the .env.staging file with the correct values before running this script. We will open the file for you in 3 seconds"
-  sleep 3
-  nano .env.staging
-  bash ./scripts/prepopulate.sh staging
-fi
-if ask_for_confirmation "Do you want to Prepopulate data for the PROD environment?"; then
-  echo "Please update the .env.prod file with the correct values before running this script. We will open the file for you in 3 seconds"
-  sleep 3
-  nano .env.prod
-  bash ./scripts/prepopulate.sh prod
-fi
+env_dir="${1:-/opt/dx}"
+
+print_status "We will ask you for each of [test | staging | production]
+if you want to prepopulate data for that environment.
+Each environment's env file in $env_dir must be filled in first."
+for environment in test staging production; do
+  if ask_for_confirmation "Do you want to prepopulate data for the $environment environment?"; then
+    make seed ENV="$environment" ENV_DIR="$env_dir"
+  fi
+done
 echo "Done."

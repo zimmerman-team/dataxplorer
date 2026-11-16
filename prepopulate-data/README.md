@@ -2,12 +2,10 @@
 
 This folder holds public assets data to be populated for guest users.
 
-- Note: To run the commands below you have to have `jq` installed in the environment
-
 ## Generate
 
-To generate the data run the backup script [backup.sh](../scripts/backup.sh)
+Export the public (baseline) data from your local DX with `make script name=export-baseline` ([export-baseline.sh](../scripts/export-baseline.sh)). It needs `jq`.
 
 ## Populate
 
-To Populate the data run the prepopulate script [prepopulate.sh](../scripts/prepopulate.sh)
+Load the data into an environment with `make seed ENV=<env>` ([prepopulate.sh](../scripts/prepopulate.sh)).

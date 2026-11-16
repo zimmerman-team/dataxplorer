@@ -1,0 +1,20 @@
+# Development only: `make dev` adds this file, so every app image is built from
+# your checkouts next to this repo (`make repos` clones them) instead of pulled
+# from a registry. No GitHub token needed. Servers never use this file.
+
+services:
+  server:
+    image: dx-server:dev
+    build: ../dx.server
+  backend:
+    image: dx-backend:dev
+    build: ../dx.backend
+  ai-api:
+    image: dx-ai-api:dev
+    build: ../general-ai-api
+  client:
+    image: dx-client:dev
+    build: ../dx.client
+  cms:
+    image: dx-cms:dev
+    build: ../CMS-DX

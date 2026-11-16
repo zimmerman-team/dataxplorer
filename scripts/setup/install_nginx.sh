@@ -37,38 +37,36 @@ sudo add-apt-repository universe -y
 sudo apt-get update -y
 sudo apt-get install certbot python3-certbot-nginx -y
 
-# Configure nginx
-# sudo cp ./nginx/default /etc/nginx/sites-available/default
-print_status "We will ask you for each of [test | staging | prod]
+# Configure nginx: the host's nginx proxies to the containers' ports, which
+# match CLIENT_PORT and SERVER_PORT in that environment's env file.
+print_status "We will ask you for each of [test | staging | production]
 if you want to create an NGINX configuration for that environment."
 # Function to configure NGINX for a given environment
 configure_nginx() {
   local config_name="$1"
-  local url_var="$2"
-  local root_var="$3"
-  local port_var="$4"
+  local client_port="$2"
+  local server_port="$3"
+  local url_var
 
   if ask_for_confirmation "Do you want to create an NGINX configuration for the $config_name environment?"; then
-    mkdir $PWD/dx.client/$config_name/build # ensure an initual build folder exists to prevent nginx from crashing
     sudo cp ./scripts/setup/nginx_host_machine/base_app "/etc/nginx/sites-available/$config_name-app"
     sudo cp ./scripts/setup/nginx_host_machine/base_server "/etc/nginx/sites-available/$config_name-server"
-    sudo cp ./scripts/setup/nginx_host_machine/base_monitoring "/etc/nginx/sites-available/$config_name-monitoring"
 
     read -rp "What is the base URL for the $config_name environment (without app. or server.)?: " url_var
     sudo sed -i "s/REPL_URL/$url_var/g" "/etc/nginx/sites-available/$config_name-app"
-    sudo sed -i "s#REPL_ROOT#/var/www/html/$config_name/build#g" "/etc/nginx/sites-available/$config_name-app"
+    sudo sed -i "s/REPL_PORT/$client_port/g" "/etc/nginx/sites-available/$config_name-app"
     sudo sed -i "s/REPL_URL/$url_var/g" "/etc/nginx/sites-available/$config_name-server"
-    sudo sed -i "s/REPL_URL/$url_var/g" "/etc/nginx/sites-available/$config_name-monitoring"
-    sudo sed -i "s/REPL_PORT/$port_var/g" "/etc/nginx/sites-available/$config_name-server"
+    sudo sed -i "s/REPL_PORT/$server_port/g" "/etc/nginx/sites-available/$config_name-server"
 
     sudo ln -s "/etc/nginx/sites-available/$config_name-app" /etc/nginx/sites-enabled/
     sudo ln -s "/etc/nginx/sites-available/$config_name-server" /etc/nginx/sites-enabled/
-    sudo ln -s "/etc/nginx/sites-available/$config_name-monitoring" /etc/nginx/sites-enabled/
   fi
 }
-configure_nginx "test" "test_url" "test_root" "4202"
-configure_nginx "staging" "staging_url" "staging_root" "4201"
-configure_nginx "prod" "prod_url" "prod_root" "4200"
+# Default ports from .env.example: client, then server. Each environment has
+# its own ports, so test and staging can share a server.
+configure_nginx "test" "8202" "4202"
+configure_nginx "staging" "8201" "4201"
+configure_nginx "production" "8200" "4200"
 
 # Restart nginx
 print_status "Restarting NGINX..."

@@ -1,6 +1,24 @@
+# Env files hold secrets: only .env.example is committed.
 .env
-.env.dev
-.env.test
-.env.staging
-.env.prod
+.env.*
+!.env.example
+
+# Each developer's own compose overrides (see compose.override.example.yaml)
+compose.override.yaml
+
+# Local key files (kaggle.json, hdx_configuration.yaml, ...)
+/secrets/
+
+# MongoDB and Redis data when make native starts them
+/.native/
+
 .DS_Store
+
+# The app repos used to be submodules at these paths, and switching branches
+# leaves their folders behind. Delete them, or clone the app repos next to this one.
+/dx.backend/
+/dx.client/
+/dx.server/
+/general-ai-api/
+/monitoring/
+/rawgraphs-charts/

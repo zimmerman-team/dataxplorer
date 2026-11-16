@@ -1,4 +1,6 @@
 #!/bin/bash
+# Usage: bash scripts/setup/setup_db_snapshots.sh [ENV_DIR]  (default /opt/dx)
+# Adds a nightly `make backup` cron job for the environments you choose.
 
 print_status() {
     echo "
@@ -27,35 +29,24 @@ ask_for_confirmation() {
   esac
 }
 
-print_status "Setting up MongoDB snapshots...
-We will ask you if you want to set up a snapshot for each environment."
+env_dir="${1:-/opt/dx}"
+repo_dir="$(pwd)"
 
-chmod +x ./scripts/snapshot_db.sh
-# Define the path to the script
-SCRIPT_PATH="$(pwd)/scripts/snapshot_db.sh"
-# echo script path
-echo script path: $SCRIPT_PATH
+print_status "Setting up MongoDB snapshots...
+We will ask you if you want to set up a nightly snapshot for each environment."
 
 add_crontab() {
-  local ARG="$1"
-  sudo bash -c "(crontab -l ; echo '0 0 * * * $SCRIPT_PATH $ARG') | crontab -"
+  local environment="$1"
+  (crontab -l 2>/dev/null; echo "0 0 * * * cd $repo_dir && make backup ENV=$environment ENV_DIR=$env_dir >> /var/log/dx-backup-$environment.log 2>&1") | crontab -
 }
 
-# Function to enable snapshots and add crontab
-enable_snapshots() {
-  local environment="$1"
+for environment in test staging production; do
   if ask_for_confirmation "Do you want to enable snapshots for $environment?"; then
     echo "Enabling $environment snapshots..."
     add_crontab "$environment"
   else
     echo "Skipping $environment."
   fi
-}
+done
 
-# Call the function for each environment
-enable_snapshots "dev"
-enable_snapshots "prod"
-enable_snapshots "test"
-enable_snapshots "staging"
-
-print_status "Cron job added successfully."
+print_status "Cron job added successfully. Snapshots are written to $repo_dir/snapshots."

@@ -1,55 +1,32 @@
 #!/bin/bash
+# Restore a dump from snapshots/ into ENV's database, replacing the collections in it.
+# Run it through make: make restore ENV=staging snapshot=production-20261113120000.archive.gz
+# Folders from the old snapshot script (snapshots/<timestamp>/) work too.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+. scripts/lib.sh
 
-# Help
-if [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
-  echo "Used to restore data in the DX environment from a backup folder. Specify the environment type and backup folder name."
-  echo "Note: This script is not connected to any automated services."
-  echo "      Find your snapshot name at ls -lsht ./snapshots."
-  echo ""
-  echo "Usage: bash $0 [dev|test|staging|prod] [backup_folder_name]"
-  exit 0
-fi
-
-# Start
-# Check if two arguments are provided
-if [ $# -lt 2 ]; then
-  echo "Usage: $0 [dev|test|staging|prod] [backup_folder_name]"
+name="${1:-}"
+dir="${BACKUP_DIR:-snapshots}"
+if [ -z "$name" ] || [ ! -e "$dir/$name" ]; then
+  echo "Usage: make restore ENV=<env> snapshot=<name>. Snapshots in $dir/:" >&2
+  ls -1t "$dir" >&2 || true
   exit 1
 fi
 
-# Extract the arguments provided
-MODE="$1"
-BACKUP_FOLDER="$2"
+confirm "Replace the data in $ENV's database with $name?" || { echo "Aborted."; exit 1; }
 
-# if $MODE is not dev, test, staging or prod, then exit
-if [ "$MODE" != "dev" ] && [ "$MODE" != "test" ] && [ "$MODE" != "staging" ] && [ "$MODE" != "prod" ]; then
-  echo "Invalid mode. Use 'dev', 'test', 'staging' or 'prod'."
-  exit 1
+if [ -f "$dir/$name" ]; then
+  mongo_exec mongorestore --archive --gzip --drop --nsInclude "$DX_DB.*" < "$dir/$name"
+elif [ -n "${NATIVE:-}" ]; then
+  # Old format, without Docker: restore straight from the folder.
+  mongo_exec mongorestore --drop --nsInclude "$DX_DB.*" --dir "$dir/$name"
+else
+  # Old format: a mongodump folder holding one folder per database.
+  tmp="/tmp/restore-$name"
+  dc cp "$dir/$name" "mongo:$tmp"
+  mongo_exec mongorestore --drop --nsInclude "$DX_DB.*" --dir "$tmp"
+  dc exec -T mongo rm -rf "$tmp"
 fi
 
-# Define variables
-MONGO_DB="the-data-explorer-db"
-# Assign dx-mongo to $CONTAINER_ID
-CONTAINER_ID="dx-mongo"
-if [ "$MODE" != "prod" ]; then
-    CONTAINER_ID="dx-mongo-$MODE"
-fi
-
-MONGO_INITDB_ROOT_USERNAME=$(grep -E "^MONGO_INITDB_ROOT_USERNAME=" ".env.$MODE" | cut -d= -f2)
-MONGO_INITDB_ROOT_PASSWORD=$(grep -E "^MONGO_INITDB_ROOT_PASSWORD=" ".env.$MODE" | cut -d= -f2)
-
-# Check if the backup folder exists
-BACKUP_DIR="./snapshots/$BACKUP_FOLDER"
-if [ ! -d "$BACKUP_DIR" ]; then
-  echo "Backup folder '$BACKUP_FOLDER' not found."
-  echo "these are available:"
-  ls ./snapshots
-  exit 1
-fi
-
-# Restore MongoDB database
-docker cp $BACKUP_DIR $CONTAINER_ID:/tmp
-docker exec $CONTAINER_ID mongorestore --username "$MONGO_INITDB_ROOT_USERNAME" --password "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --db $MONGO_DB --drop /tmp/$BACKUP_FOLDER/$MONGO_DB
-
-# # Remove backup folder from the container
-docker exec $CONTAINER_ID rm -rf /tmp/$BACKUP_FOLDER
+echo "Restored $name into $ENV."
