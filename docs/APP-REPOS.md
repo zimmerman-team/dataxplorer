@@ -22,10 +22,10 @@ The infra repo only pins images; each app repo builds its own. This page lists w
 | general-ai-api | `dx-ai-api` | `ai-api` | `main` |
 | cms.dataxplorer (`CMS-DX/`) | `dx-cms` | `cms` | `main` |
 
-Before the image workflows can run, each repo needs:
+Tokens:
 
-- `DX_INFRA_TOKEN`: a secret holding a token (fine-grained PAT or GitHub App) allowed to run workflows (`actions: write`) in the infra repo, zimmerman-team/dataxplorer. Without it the image is still pushed, with a warning that infra.dx wasn't told.
-- After the first push, in each package's settings on GitHub: give the DX repo read access, so its deploy workflow can pull with its own `GITHUB_TOKEN`.
+- **Pulling the images.** The packages are private. Each server logs in once with a classic token that has only `read:packages` (docs/MIGRATION.md, "Before you start"); nothing in GitHub needs it.
+- **`DX_INFRA_TOKEN`**, so a pushed image updates the environments that follow its branch. It's a repository secret in each app repo, which only a repo admin can add. It holds a fine-grained token with access to zimmerman-team/dataxplorer only and **Actions: Read and write** (the organisation may have to approve it). Until it's set, the image is still built and pushed (with a warning), and the tag is updated by hand: run **Update image tag** in dataxplorer's Actions tab (service, branch, commit SHA), which write access is enough for.
 
 Production runs exactly the image staging tested when its PR copies staging's tag.
 

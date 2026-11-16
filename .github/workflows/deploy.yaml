@@ -6,10 +6,11 @@ name: Deploy
 # Runs when called by deploy-on-merge, update-tag or switch-branch, or by hand
 # from the Actions tab. To roll back, restore the previous tag in the versions file.
 #
-# Each environment's server needs a self-hosted runner labelled with the
-# environment's name (production: prod; a server running test and staging has
-# one runner with both labels), a deploy user in the docker group, and the env
-# file in /opt/dx (or the DX_ENV_DIR variable).
+# Each environment deploys on the self-hosted runner labelled with the RUNNER
+# value in its versions file (test shares staging's server, so RUNNER=staging).
+# The server needs a deploy user in the docker group, logged in to ghcr.io once
+# with a read:packages token (docs/MIGRATION.md), and the env file in /opt/dx
+# (or the DX_ENV_DIR variable).
 
 on:
   workflow_call:
@@ -29,13 +30,46 @@ on:
         type: string
 
 jobs:
+  runner:
+    name: Find ${{ inputs.environment }}'s runner
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      label: ${{ steps.label.outputs.label }}
+    steps:
+      - name: Only deploy production from main
+        if: github.event_name == 'workflow_dispatch' && inputs.environment == 'production' && github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Production deploys only from main, not ${GITHUB_REF}."
+          exit 1
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - id: label
+        env:
+          TARGET_ENV: ${{ inputs.environment }}
+        run: |
+          file="versions.$TARGET_ENV.env"
+          if [ ! -f "$file" ]; then
+            echo "::error::There is no $file."
+            exit 1
+          fi
+          label="$(sed -n 's/^RUNNER=//p' "$file")"
+          if [ -z "$label" ]; then
+            echo "::error::$file has no RUNNER line naming the server's runner label."
+            exit 1
+          fi
+          echo "$TARGET_ENV deploys on the runner labelled $label"
+          echo "label=$label" >> "$GITHUB_OUTPUT"
+
   deploy:
     name: Deploy ${{ inputs.environment }}
-    runs-on: [self-hosted, "${{ inputs.environment == 'production' && 'prod' || inputs.environment }}"]
+    needs: runner
+    runs-on: [self-hosted, "${{ needs.runner.outputs.label }}"]
     environment: ${{ inputs.environment }}
     permissions:
       contents: read
-      packages: read
     concurrency:
       group: deploy-${{ inputs.environment }}
       cancel-in-progress: false
@@ -43,30 +77,13 @@ jobs:
       TARGET_ENV: ${{ inputs.environment }}
       ENV_DIR: ${{ vars.DX_ENV_DIR || '/opt/dx' }}
     steps:
-      - name: Only deploy production from main
-        if: github.event_name == 'workflow_dispatch' && inputs.environment == 'production' && github.ref != 'refs/heads/main'
-        run: |
-          echo "::error::Production deploys only from main, not ${GITHUB_REF}."
-          exit 1
-
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref || github.ref }}
 
-      - name: Check the environment exists
-        run: |
-          if [ ! -f "versions.$TARGET_ENV.env" ]; then
-            echo "::error::There is no versions.$TARGET_ENV.env."
-            exit 1
-          fi
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
+      # Pulls use the server's own `docker login ghcr.io` (a read:packages
+      # token), so there's no login step here: one would also log the server
+      # out again when the job ends.
       - name: Deploy
         run: make up ENV="$TARGET_ENV" ENV_DIR="$ENV_DIR"
 

@@ -7,7 +7,14 @@ The old volumes and folders are left untouched, so going back is stopping the ne
 ## Before you start
 
 - The images for the tags in `versions.<env>.env` exist in GitHub Container Registry ([APP-REPOS.md](APP-REPOS.md)). Until then `make up` can't pull them.
-- The server has a self-hosted GitHub runner labelled with the environment's name (`test`, `staging`; production keeps `prod`), running as a deploy user in the `docker` group. The deploy workflows run on it. On the server test and staging share, one runner carries both labels.
+- The server has a self-hosted GitHub runner with the label in the versions file's `RUNNER=` line (`staging` for test and staging, `prod` for production), running as a deploy user in the `docker` group. The deploy workflows run on it.
+- That deploy user is logged in to ghcr.io, because the images are private: create a classic GitHub token with only the `read:packages` scope (GitHub's registry doesn't take fine-grained tokens), then on the server, as the deploy user:
+
+  ```bash
+  echo <token> | docker login ghcr.io -u <github user> --password-stdin
+  ```
+
+  Check it with `docker pull ghcr.io/zimmerman-team/dx-server:<SERVER_TAG from versions.staging.env>`. Give the token an expiry and log in again with a new one before it runs out.
 
 ## 1. Check the versions the server runs
 
@@ -107,7 +114,7 @@ Run steps 2 to 6 once per environment, `ENV=test` and `ENV=staging`, on the same
 
 - Two env files, `/opt/dx/.env.test` and `/opt/dx/.env.staging`, with their own ports (test 8202/4202/4006/5002, staging 8201/4201/4005/5001) and `BACKEND_MEMORY_LIMIT`. They share `/opt/dx/secrets`.
 - `make import-legacy` picks each environment's old volumes (`dx_dx_mongo_data_test`, `dx_dx_mongo_data_staging`) and only checks that environment's old containers are stopped, so you can move one environment at a time.
-- The runner gets both labels, `test` and `staging`.
+- Both deploy on the server's staging runner: `versions.test.env` says `RUNNER=staging`.
 - **The CMS stays as it is.** The existing Strapi and its Postgres keep running from their own compose, outside infra.dx. Keep `COMPOSE_PROFILES` empty in both env files, and set `VITE_CMS_API` and `VITE_CMS_TOKEN` to the values the old env files used, so the client keeps reading the existing CMS. Its port (1337) doesn't clash with anything infra.dx publishes.
 
 Each runs as its own compose project, so deploying or stopping one leaves the other running.

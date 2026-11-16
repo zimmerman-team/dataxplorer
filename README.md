@@ -126,7 +126,7 @@ Branch names live only in the versions files. When the app repos change branches
 - **Point a service at another branch:** run the `switch-branch` workflow (environment, service, branch). It looks up the branch's latest commit, sets `<SERVICE>_BRANCH` and `<SERVICE>_TAG`, and deploys. From then on, every push to that branch deploys there. The branch needs an image first: push to it, or run the app repo's image workflow on it.
 - **Add an environment for a feature**, for example `versions.dx-137.env`:
   1. Copy `versions.test.env` to `versions.<name>.env` and set the branches it follows.
-  2. On its server: an env file at `/opt/dx/.env.<name>` (see `.env.example`) with ports no other environment on that server uses, and a self-hosted runner labelled `<name>` (or add the label to the runner already there).
+  2. On its server: an env file at `/opt/dx/.env.<name>` (see `.env.example`) with ports no other environment on that server uses, and `RUNNER=` in the new versions file set to the label of the self-hosted runner on that server.
   3. Merge the new versions file. It deploys, and from then on follows its branches.
 
   To remove the environment, run `make down ENV=<name> ENV_DIR=/opt/dx` on the server and delete its versions file.
@@ -167,13 +167,16 @@ Today the server environments are `test`, `staging` and `production`.
 
 ## Servers
 
-`bash scripts/setup.sh` prepares a server: Docker, the env files and key folder in `/opt/dx`, nginx, nightly backups. Each server environment also needs a self-hosted GitHub runner carrying its name as a label (`production` uses the existing `prod` label), running as a user in the `docker` group.
+`bash scripts/setup.sh` prepares a server: Docker, the env files and key folder in `/opt/dx`, nginx, nightly backups. Each server also needs:
+
+- **A self-hosted GitHub runner**, running as a user in the `docker` group. Each versions file's `RUNNER=` line names the runner label its environment deploys on (`staging` for test and staging, `prod` for production), so no runner needs relabelling.
+- **A one-time `docker login ghcr.io`** as that user, with a classic GitHub token that has only the `read:packages` scope, because the images are private. `make up` and the deploy workflow both pull with it. Run `echo <token> | docker login ghcr.io -u <github user> --password-stdin`, and log in again when the token expires.
 
 ### Several environments on one server
 
 Test and staging share a server. Nothing extra is needed beyond what each environment has anyway:
 
-- **One runner, both labels.** Give the server's runner the labels `test` and `staging`. Deploys of the two then queue on it one after the other.
+- **One runner.** Both versions files say `RUNNER=staging`, so both environments deploy on the server's existing staging runner, one after the other.
 - **One env file each**, `/opt/dx/.env.test` and `/opt/dx/.env.staging`, with their own ports (the defaults in `.env.example` already differ) and `BACKEND_MEMORY_LIMIT` set so the two backends fit the server's memory, for example `4G` each. They can share `/opt/dx/secrets`.
 - **Everything else is separate already**: each environment is its own compose project (`dx-test`, `dx-staging`) with its own containers, network and data volumes. Deploying, stopping or restoring one never touches the other.
 - **nginx**: `scripts/setup/install_nginx.sh` sets up a site per environment, each pointing at that environment's ports.
