@@ -1,0 +1,93 @@
+name: Deploy on merge
+
+# Merging to main deploys what changed:
+# - versions.<env>.env      -> that environment
+# - compose files, Makefile -> every environment
+# Production deploys after staging when both change, and not if staging failed.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - versions.*.env
+      - compose.yaml
+      - compose.prod.yaml
+      - Makefile
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      staging: ${{ steps.diff.outputs.staging }}
+      production: ${{ steps.diff.outputs.production }}
+      others: ${{ steps.diff.outputs.others }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: diff
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            changed="$(git diff --name-only "$BEFORE" "$GITHUB_SHA")"
+          else
+            changed="$(git ls-files)"
+          fi
+          echo "Changed files:"; echo "$changed"
+
+          if grep -qxE 'compose\.yaml|compose\.prod\.yaml|Makefile' <<< "$changed"; then
+            files="$(ls versions.*.env)"
+          else
+            files="$(grep -xE 'versions\..+\.env' <<< "$changed" || true)"
+          fi
+
+          staging=false; production=false; others=()
+          for f in $files; do
+            [ -f "$f" ] || continue   # a deleted environment
+            env="${f#versions.}"; env="${env%.env}"
+            case "$env" in
+              staging) staging=true ;;
+              production) production=true ;;
+              *) others+=("$env") ;;
+            esac
+          done
+          echo "staging=$staging" >> "$GITHUB_OUTPUT"
+          echo "production=$production" >> "$GITHUB_OUTPUT"
+          echo "others=$(printf '%s\n' "${others[@]}" | jq -Rc 'select(length > 0)' | jq -cs .)" >> "$GITHUB_OUTPUT"
+
+  staging:
+    needs: changes
+    if: needs.changes.outputs.staging == 'true'
+    uses: ./.github/workflows/deploy.yaml
+    with:
+      environment: staging
+      ref: ${{ github.sha }}
+    secrets: inherit
+
+  # test and any feature-server environments
+  others:
+    needs: changes
+    if: needs.changes.outputs.others != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: ${{ fromJSON(needs.changes.outputs.others) }}
+    uses: ./.github/workflows/deploy.yaml
+    with:
+      environment: ${{ matrix.environment }}
+      ref: ${{ github.sha }}
+    secrets: inherit
+
+  production:
+    needs: [changes, staging]
+    if: always() && needs.changes.outputs.production == 'true' && needs.staging.result != 'failure' && needs.staging.result != 'cancelled'
+    uses: ./.github/workflows/deploy.yaml
+    with:
+      environment: production
+      ref: ${{ github.sha }}
+    secrets: inherit

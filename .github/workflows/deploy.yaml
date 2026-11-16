@@ -1,59 +1,78 @@
-name: Deploy to Prod with Self-Hosted Runner
+name: Deploy
+
+# Pulls the image tags in versions.<env>.env and starts them on that environment's
+# server. Nothing is built on the server.
+#
+# Runs when called by deploy-on-merge, update-tag or switch-branch, or by hand
+# from the Actions tab. To roll back, restore the previous tag in the versions file.
+#
+# Each environment's server needs a self-hosted runner labelled with the
+# environment's name (production: prod; a server running test and staging has
+# one runner with both labels), a deploy user in the docker group, and the env
+# file in /opt/dx (or the DX_ENV_DIR variable).
 
 on:
-  workflow_dispatch: # Allow manual triggering
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+      ref:
+        description: Commit of this repo to deploy
+        required: false
+        type: string
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to deploy: the <env> of a versions.<env>.env file"
+        required: true
+        type: string
 
 jobs:
   deploy:
-    runs-on: [self-hosted, prod] # Use the self-hosted runner
-
+    name: Deploy ${{ inputs.environment }}
+    runs-on: [self-hosted, "${{ inputs.environment == 'production' && 'prod' || inputs.environment }}"]
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+      packages: read
+    concurrency:
+      group: deploy-${{ inputs.environment }}
+      cancel-in-progress: false
+    env:
+      TARGET_ENV: ${{ inputs.environment }}
+      ENV_DIR: ${{ vars.DX_ENV_DIR || '/opt/dx' }}
     steps:
-      - name: Navigate to DX folder
-        run: cd ~/DX
-
-      - name: Pull latest changes
+      - name: Only deploy production from main
+        if: github.event_name == 'workflow_dispatch' && inputs.environment == 'production' && github.ref != 'refs/heads/main'
         run: |
-          git checkout main  
-          git pull origin main
+          echo "::error::Production deploys only from main, not ${GITHUB_REF}."
+          exit 1
 
-      - name: Pull Dx.Client
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Check the environment exists
         run: |
-          cd dx.client
-          git checkout main
-          git pull origin main
-          cd ..
+          if [ ! -f "versions.$TARGET_ENV.env" ]; then
+            echo "::error::There is no versions.$TARGET_ENV.env."
+            exit 1
+          fi
 
-      - name: Pull Dx.Server
-        run: |
-          cd dx.server
-          git checkout main
-          git pull origin main
-          cd ..
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Pull Dx.backend
-        run: |
-          cd dx.backend
-          git checkout main
-          git pull origin main
-          cd ..
+      - name: Deploy
+        run: make up ENV="$TARGET_ENV" ENV_DIR="$ENV_DIR"
 
-      - name: Pull Rawgraphs
-        run: |
-          cd rawgraphs-charts
-          git checkout feat/DX-137
-          git pull origin feat/DX-137
-          cd ..
+      - name: Show the running services
+        if: always()
+        run: make ps ENV="$TARGET_ENV" ENV_DIR="$ENV_DIR"
 
-      - name: Pull General AI API
-        run: |
-          cd general-ai-api
-          git checkout main
-          git pull origin main
-          cd ..
-
-      - name: Run deployment script
-        run: |
-          yes | sudo bash scripts/redeploy.sh test
-
-      - name: Run copy script
-        run: sudo rm -rf /var/www/html/prod/build/ && cp -r /root/DX/dx.client/prod/build/ /var/www/html/prod/
+      - name: Remove images unused for a week
+        run: docker image prune --all --force --filter "until=168h"

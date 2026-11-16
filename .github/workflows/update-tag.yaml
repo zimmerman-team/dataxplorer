@@ -1,0 +1,102 @@
+name: Update image tag
+
+# App repos run this after their CI pushes an image for a branch:
+#
+#   gh workflow run update-tag.yaml -R zimmerman-team/DX \
+#     -f service=server -f branch=develop -f tag=<full commit SHA>
+#
+# Every environment whose versions file follows that branch for that service
+# (SERVER_BRANCH=develop) gets the new tag, committed to main, and is deployed.
+# If no environment follows the branch, nothing happens. Production follows no
+# branch, so it's never changed here.
+
+on:
+  workflow_dispatch:
+    inputs:
+      service:
+        required: true
+        type: choice
+        options: [client, server, backend, ai-api, cms]
+      branch:
+        description: Branch the image was built from
+        required: true
+        type: string
+      tag:
+        description: Image tag (the branch's full commit SHA)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  packages: read
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    # No concurrency group: GitHub would cancel queued runs and lose their tags.
+    # Instead each attempt starts again from the latest main.
+    outputs:
+      environments: ${{ steps.commit.outputs.environments }}
+      sha: ${{ steps.commit.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Write the tag into the environments that follow ${{ inputs.branch }}
+        id: commit
+        env:
+          SERVICE: ${{ inputs.service }}
+          BRANCH: ${{ inputs.branch }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          [[ "$TAG" =~ ^[A-Za-z0-9._-]{1,128}$ ]] || { echo "::error::Not a valid image tag: $TAG"; exit 1; }
+          [[ "$BRANCH" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "::error::Not a valid branch name: $BRANCH"; exit 1; }
+          prefix="$(echo "$SERVICE" | tr 'a-z-' 'A-Z_')"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          done=false
+          for attempt in 1 2 3 4 5; do
+            git fetch --quiet origin main
+            git reset --quiet --hard origin/main
+            envs=()
+            for f in versions.*.env; do
+              env="${f#versions.}"; env="${env%.env}"
+              [ "$env" != production ] || continue
+              if grep -qxF "${prefix}_BRANCH=$BRANCH" "$f"; then
+                sed -i "s|^${prefix}_TAG=.*|${prefix}_TAG=$TAG|" "$f"
+                envs+=("$env")
+              fi
+            done
+            if [ ${#envs[@]} -eq 0 ]; then
+              echo "No environment follows $SERVICE $BRANCH; nothing to do."
+              done=true; break
+            fi
+            if git diff --quiet; then
+              echo "${envs[*]} already run $SERVICE $TAG."
+              envs=(); done=true; break
+            fi
+            git commit --quiet -am "chore: $SERVICE $BRANCH ${TAG:0:12} to ${envs[*]}"
+            if git push origin HEAD:main; then
+              done=true; break
+            fi
+            sleep $((attempt * 3))
+          done
+          [ "$done" = true ] || { echo "::error::Could not push to main"; exit 1; }
+
+          echo "environments=$(printf '%s\n' "${envs[@]}" | jq -Rc 'select(length > 0)' | jq -cs .)" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    needs: update
+    if: needs.update.outputs.environments != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: ${{ fromJSON(needs.update.outputs.environments) }}
+    uses: ./.github/workflows/deploy.yaml
+    with:
+      environment: ${{ matrix.environment }}
+      ref: ${{ needs.update.outputs.sha }}
+    secrets: inherit

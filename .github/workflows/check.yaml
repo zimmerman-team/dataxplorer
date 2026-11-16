@@ -1,0 +1,16 @@
+name: Check
+
+# Every pull request: the compose files must render for every environment.
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: make check

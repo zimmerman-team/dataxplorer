@@ -1,0 +1,91 @@
+name: Switch branch
+
+# Point one service of an environment at another branch, for example a feature
+# server running a client branch, or test running a branch under review. It
+# looks up the branch's latest commit, writes <SERVICE>_BRANCH and <SERVICE>_TAG
+# into versions.<env>.env on main, and deploys. From then on, every image the
+# app repo pushes for that branch deploys there too (update-tag).
+#
+# The branch's latest commit needs an image already: push to the branch, or run
+# the app repo's image workflow on it, first. Production follows no branch;
+# change versions.production.env in a pull request.
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment: the <env> of a versions.<env>.env file"
+        required: true
+        type: string
+      service:
+        required: true
+        type: choice
+        options: [client, server, backend, ai-api, cms]
+      branch:
+        description: Branch of the service's app repo to follow
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  packages: read
+
+jobs:
+  switch:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.commit.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Follow ${{ inputs.branch }}
+        id: commit
+        env:
+          TARGET_ENV: ${{ inputs.environment }}
+          SERVICE: ${{ inputs.service }}
+          BRANCH: ${{ inputs.branch }}
+        run: |
+          [ "$TARGET_ENV" != production ] || { echo "::error::Production follows no branch. Change versions.production.env in a pull request."; exit 1; }
+          file="versions.$TARGET_ENV.env"
+          [ -f "$file" ] || { echo "::error::There is no $file."; exit 1; }
+          [[ "$BRANCH" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "::error::Not a valid branch name: $BRANCH"; exit 1; }
+
+          repo="$(awk -v name="$SERVICE" '$1 == name { print $2 }' repos.txt)"
+          tag="$(git ls-remote "https://github.com/$repo.git" "refs/heads/$BRANCH" | cut -f1)"
+          [ -n "$tag" ] || { echo "::error::$repo has no branch $BRANCH."; exit 1; }
+          echo "$repo $BRANCH is at $tag"
+
+          prefix="$(echo "$SERVICE" | tr 'a-z-' 'A-Z_')"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          done=false
+          for attempt in 1 2 3 4 5; do
+            git fetch --quiet origin main
+            git reset --quiet --hard origin/main
+            for key in BRANCH TAG; do
+              grep -q "^${prefix}_$key=" "$file" || { echo "::error::$file has no ${prefix}_$key line."; exit 1; }
+            done
+            sed -i -e "s|^${prefix}_BRANCH=.*|${prefix}_BRANCH=$BRANCH|" -e "s|^${prefix}_TAG=.*|${prefix}_TAG=$tag|" "$file"
+            if git diff --quiet; then
+              echo "$TARGET_ENV already runs $SERVICE from $BRANCH at $tag."
+              done=true; break
+            fi
+            git commit --quiet -am "chore($TARGET_ENV): $SERVICE follows $BRANCH (${tag:0:12})"
+            if git push origin HEAD:main; then
+              done=true; break
+            fi
+            sleep $((attempt * 3))
+          done
+          [ "$done" = true ] || { echo "::error::Could not push to main"; exit 1; }
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    needs: switch
+    uses: ./.github/workflows/deploy.yaml
+    with:
+      environment: ${{ inputs.environment }}
+      ref: ${{ needs.switch.outputs.sha }}
+    secrets: inherit
