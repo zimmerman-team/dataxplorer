@@ -5,9 +5,9 @@
 # that isn't a service.
 #
 # name              GitHub repo                       folder next to this repo   branch
-client              zimmerman-team/Dx.client          dx.client
-server              zimmerman-team/Dx.server          dx.server
+client              zimmerman-team/dataxplorer.client dx.client
+server              zimmerman-team/dataxplorer.server dx.server
 backend             zimmerman-team/dx.backend         dx.backend
 ai-api              zimmerman-team/general-ai-api     general-ai-api
-cms                 zimmerman-team/CMS-DX             CMS-DX
+cms                 zimmerman-team/cms.dataxplorer    CMS-DX
 rawgraphs-charts    zimmerman-team/rawgraphs-charts   rawgraphs-charts           feat/DX-137

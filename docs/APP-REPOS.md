@@ -16,28 +16,28 @@ The infra repo only pins images; each app repo builds its own. This page lists w
 
 | Repo | Image | `service` input | Active branch (test and staging follow `chore/standardisation` until production moves) |
 |---|---|---|---|
-| Dx.client | `dx-client` | `client` | `develop` |
-| Dx.server | `dx-server` | `server` | `develop` |
+| dataxplorer.client (`dx.client/`) | `dx-client` | `client` | `develop` |
+| dataxplorer.server (`dx.server/`) | `dx-server` | `server` | `develop` |
 | dx.backend | `dx-backend` | `backend` | `main` |
 | general-ai-api | `dx-ai-api` | `ai-api` | `main` |
-| CMS-DX | `dx-cms` | `cms` | `main` |
+| cms.dataxplorer (`CMS-DX/`) | `dx-cms` | `cms` | `main` |
 
 Before the image workflows can run, each repo needs:
 
-- `DX_INFRA_TOKEN`: a secret holding a token (fine-grained PAT or GitHub App) allowed to run workflows (`actions: write`) in zimmerman-team/DX. Without it the image is still pushed, with a warning that infra.dx wasn't told.
+- `DX_INFRA_TOKEN`: a secret holding a token (fine-grained PAT or GitHub App) allowed to run workflows (`actions: write`) in the infra repo, zimmerman-team/dataxplorer. Without it the image is still pushed, with a warning that infra.dx wasn't told.
 - After the first push, in each package's settings on GitHub: give the DX repo read access, so its deploy workflow can pull with its own `GITHUB_TOKEN`.
 
 Production runs exactly the image staging tested when its PR copies staging's tag.
 
 ## Per repo
 
-### Dx.client
+### dataxplorer.client (dx.client)
 
 Done:
 - Its own `Dockerfile`: builds rawgraphs-charts from a pinned commit (`RAWGRAPHS_REF`, the same one the server pins), links it in, builds the app, and serves `build/` with nginx on port 80, falling back to `index.html` for client-side routes.
 - Settings when the container starts, not at build time: for Docker builds a small Vite plugin (`vite.config.ts`) turns every `import.meta.env.VITE_*` into a read from `window.__DX_ENV__`, and `docker/40-env-js.sh` writes the container's `VITE_*` variables to `env.js` when it starts. No app code changed; `yarn dev` still reads `.env`.
 
-### Dx.server
+### dataxplorer.server (dx.server)
 
 Done (on top of develop's Node 22 migration):
 - `Dockerfile` on Node 22, without pm2: it runs `node .`. The server already migrates its schema when it boots; `make migrate` does it on its own.
@@ -72,7 +72,7 @@ Done:
 
 Note: dx.server calls it on port 5000, which macOS's AirPlay Receiver can hold.
 
-### CMS-DX
+### cms.dataxplorer (CMS-DX)
 
 Done:
 - Makefile (`make dev` runs Strapi on SQLite, nothing to install), `.env.example`, image workflow. Its Dockerfile is unchanged.
@@ -90,7 +90,7 @@ Unchanged, and not a service: the client and server build it in. Both Dockerfile
 
 ### Central monitoring (separate server, planned)
 
-Monitoring moves to one server for all projects, so infra.dx runs none of it. When that server is built (likely from Central-Logging), each DX server needs one agent, set up by the monitoring side rather than by infra.dx:
+Monitoring moves to one server for all projects, so infra.dx runs none of it. When that server is built (likely from the monitoring repo, formerly Central-Logging), each DX server needs one agent, set up by the monitoring side rather than by infra.dx:
 
 - **Grafana Alloy**, as one container per server, whatever environments run there. It reads all container logs through the Docker socket (labelled with the compose project and service, so `dx-test` and `dx-staging` stay apart), and nginx's logs from `/var/log/nginx`. The server and backend log to stdout, so their log files don't need reading. It pushes logs to the central Loki and metrics to the central Prometheus, over HTTPS with credentials per server.
 - **Host and container metrics** from Alloy too (its built-in node and cAdvisor exporters), replacing node-exporter and cAdvisor.

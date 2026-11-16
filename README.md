@@ -6,11 +6,11 @@ Clone this repo and you can run the whole DX stack. It holds no application code
 
 | Service | Image (`ghcr.io/zimmerman-team/…`) | App repo | Port in the container |
 |---|---|---|---|
-| client | `dx-client` | [Dx.client](https://github.com/zimmerman-team/Dx.client) | 80 |
-| server | `dx-server` | [Dx.server](https://github.com/zimmerman-team/Dx.server) | 4200 |
+| client | `dx-client` | [dataxplorer.client](https://github.com/zimmerman-team/dataxplorer.client) | 80 |
+| server | `dx-server` | [dataxplorer.server](https://github.com/zimmerman-team/dataxplorer.server) | 4200 |
 | backend | `dx-backend` | [dx.backend](https://github.com/zimmerman-team/dx.backend) | 4004 |
 | ai-api | `dx-ai-api` | [general-ai-api](https://github.com/zimmerman-team/general-ai-api) | 5000 |
-| cms (profile) | `dx-cms` | [CMS-DX](https://github.com/zimmerman-team/CMS-DX) | 1337 |
+| cms (profile) | `dx-cms` | [cms.dataxplorer](https://github.com/zimmerman-team/cms.dataxplorer) | 1337 |
 | mongo, redis | `mongo:8.0`, `redis:8.0` | | |
 
 [rawgraphs-charts](https://github.com/zimmerman-team/rawgraphs-charts) isn't a service: the client and server build it in, at a commit both Dockerfiles pin. Monitoring isn't here either: it runs on its own server for all projects (see [Logs and monitoring](#logs-and-monitoring)).
@@ -28,7 +28,7 @@ mkdir Central-DX && cd Central-DX
 ```
 
 ```bash
-git clone https://github.com/zimmerman-team/DX.git infra.dx
+git clone https://github.com/zimmerman-team/dataxplorer.git infra.dx
 ```
 
 ```bash
@@ -40,12 +40,12 @@ You end up with:
 ```
 Central-DX/                  any name, not a git repo
 ├── infra.dx/                this repo: run every make command here
-├── dx.client/               Dx.client
-├── dx.server/               Dx.server
-├── dx.backend/              dx.backend
-├── general-ai-api/          general-ai-api
-├── CMS-DX/                  CMS-DX
-└── rawgraphs-charts/        rawgraphs-charts, on feat/DX-137 (the client links it locally)
+├── dx.client/               zimmerman-team/dataxplorer.client
+├── dx.server/               zimmerman-team/dataxplorer.server
+├── dx.backend/              zimmerman-team/dx.backend
+├── general-ai-api/          zimmerman-team/general-ai-api
+├── CMS-DX/                  zimmerman-team/cms.dataxplorer
+└── rawgraphs-charts/        zimmerman-team/rawgraphs-charts, on feat/DX-137 (the client links it locally)
 ```
 
 - **Keep the folder names.** `make dev` builds each image from `../dx.server` and so on, and the client links `../rawgraphs-charts`. If you already have a clone somewhere else, move it in.

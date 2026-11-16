@@ -2,7 +2,7 @@ name: Update image tag
 
 # App repos run this after their CI pushes an image for a branch:
 #
-#   gh workflow run update-tag.yaml -R zimmerman-team/DX \
+#   gh workflow run update-tag.yaml -R zimmerman-team/dataxplorer \
 #     -f service=server -f branch=develop -f tag=<full commit SHA>
 #
 # Every environment whose versions file follows that branch for that service
