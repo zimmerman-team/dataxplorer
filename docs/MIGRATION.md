@@ -18,7 +18,7 @@ The old volumes and folders are left untouched, so going back is stopping the ne
 
 ## 1. Check the versions the server runs
 
-The old compose files used `mongo:latest` and `redis:latest`. `compose.yaml` pins `mongo:8.0` and `redis:8.0`; a database can't start on data written by a newer version. On each server:
+The old compose files used `mongo:latest` and `redis:latest`. `compose.yaml` pins `mongo:7.0` and `redis:8.2`; a database can't start on data written by a newer version. On each server:
 
 ```bash
 docker exec dx-mongo mongod --version | head -1     # dx-mongo-staging, dx-mongo-test, ...

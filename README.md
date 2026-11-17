@@ -11,7 +11,7 @@ Clone this repo and you can run the whole DX stack. It holds no application code
 | backend | `dx-backend` | [dx.backend](https://github.com/zimmerman-team/dx.backend) | 4004 |
 | ai-api | `dx-ai-api` | [general-ai-api](https://github.com/zimmerman-team/general-ai-api) | 5000 |
 | cms (profile) | `dx-cms` | [cms.dataxplorer](https://github.com/zimmerman-team/cms.dataxplorer) | 1337 |
-| mongo, redis | `mongo:8.0`, `redis:8.0` | | |
+| mongo, redis | `mongo:7.0`, `redis:8.2` | | |
 
 [rawgraphs-charts](https://github.com/zimmerman-team/rawgraphs-charts) isn't a service: the client and server build it in, at a commit both Dockerfiles pin. Monitoring isn't here either: it runs on its own server for all projects (see [Logs and monitoring](#logs-and-monitoring)).
 
